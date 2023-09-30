@@ -55,7 +55,7 @@ class udpclient:
         self.server_address = server_address
         self.server_port = server_port
 
-    def send(self, msg) -> None:
+    def send(self, msg: str) -> None:
         self.socket.sendto(msg.encode(), (self.server_address, self.server_port))
         # print("Client: Sent message", msg, (self.server_address, self.server_port))
     
@@ -96,29 +96,37 @@ def main():
         print("Invalid port number")
         return 0
     
+    # get server_address, n_port, req_code, msgarr
     server_address, n_port, req_code, msgarr = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4:]
 
+    # initiate tcp client
     tcpclit = tcpclient(server_address=server_address, server_port=n_port, req_code=req_code, msg=msgarr)
+    
+    # connect to server and negotiate
     tcpclit.connect()
     r_port = tcpclit.negotiate()
     tcpclit.close()
 
+    # initiate udp client
     udpclit = udpclient(server_address=server_address, server_port=n_port)
     udpclit.bind("127.0.0.1", r_port)
-    print(r_port)
-    # print("Stage 1 complete")
 
+    res = []
     for msg in msgarr:
-        time.sleep(3)
-        udpclit.send(msg)
-        recv_data = udpclit.recv()
-
-        print(recv_data.decode())
-        if recv_data == "LIMIT":
+        time.sleep(1.5)
+        if str(msg) == "EXIT":
+            udpclit.send(str(msg))
             udpclit.close()
             break
-    udpclit.send("EXIT".encode())
-    udpclit.close()
+        udpclit.send(str(msg))
+        recv_data = udpclit.recv()
+
+        res.append(str(recv_data.decode())+",")
+        if "LIMIT" in recv_data.decode():
+            udpclit.close()
+            break
+    res = " ".join(res)
+    print(res[:-1])
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@ class tcpserver:
         self.req_code = req_code
         self.client_addr = None
         self.client_port = None
-        self.r_port = random.randint(1024, 65535)
+        self.r_port = -1
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.count = 0
 
@@ -40,10 +40,13 @@ class tcpserver:
                 pass
             else:
                 if client_req_code.decode() != self.req_code:   
-                    # print("server received wrong code")
+                    print("server received wrong code")
                     self.socket.close()
                     return None, None
                 stopped = True
+                self.r_port = random.randint(1024, 65535)
+                while self.socket.connect_ex((ip, self.r_port)) == 0:
+                    self.r_port = random.randint(1024, 65535)
                 conn.sendall(str(self.r_port).encode())
                 # print("server sent code", self.r_port)
                 return ip, port
@@ -106,32 +109,46 @@ class udpserver:
                 self.socket.close()
                 break
 
-            print("address: ", addr)
-            self.send(self.palindrome(data), addr)
-            print("server sent data", self.palindrome(data))
+            # print("address: ", addr)
 
+            # print(type(self.count), type(self.limit))
             if self.count == self.limit:
-                self.send("EXIT", addr)
+                self.send("{0}, LIMIT".format(self.palindrome(data)), addr)
                 self.count = 0
+                self.socket.close()
+                break
+            else:
+                self.send(self.palindrome(data), addr)
+            # self.send(self.palindrome(data), addr)
+            # print("server sent data", self.palindrome(data))
+
+            # if self.count == self.limit:
+            #     self.send("EXIT", addr)
+            #     self.count = 0
 
 
 def main():
 
+    # print(sys.argv)
     if len(sys.argv) != 3:
         print("Invalid number of arguments")
+        return 0
     if not sys.argv[2].isdigit():
         print("Invalid limit")
+        return 0
     if int(sys.argv[2]) < 0:
         print("Invalid limit")
+        return 0
+
 
     # get req_code and req_lim from command line
-    req_code, req_lim = sys.argv[1], sys.argv[2]
+    req_code, req_lim = sys.argv[1], int(sys.argv[2])
 
     # create tcpserver object
     servr = tcpserver(req_code=req_code)
 
     # bind to address and port
-    servr.bind("127.0.0.1", 0)
+    servr.bind("0.0.0.0", 0)
 
     server_port = servr.socket.getsockname()[1]
     print("SERVER_PORT=" + str(server_port))
@@ -150,7 +167,7 @@ def main():
     servr = udpserver(limit=req_lim)
     
     # bind to address and port
-    servr.bind("127.0.0.1", server_port)
+    servr.bind("0.0.0.0", server_port)
     
     # run udpserver to handle client requests
     servr.run()
