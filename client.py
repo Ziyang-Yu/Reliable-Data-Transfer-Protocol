@@ -109,7 +109,7 @@ def main():
 
     # initiate udp client
     udpclit = udpclient(server_address=server_address, server_port=n_port)
-    udpclit.bind("127.0.0.1", r_port)
+    udpclit.bind("0.0.0.0", r_port)
 
     res = []
     for msg in msgarr:
