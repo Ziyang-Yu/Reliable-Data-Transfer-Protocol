@@ -16,14 +16,25 @@ def append_to_log(packet):
     """
     Appends the packet information to the log file
     """
-    raise NotImplementedError('append_to_log not implemented')
+    # raise NotImplementedError('append_to_log not implemented')
+    return 
     
 
-def send_ack(): #Args to be added
+def send_ack(recv_packet: Packet, ne_addr: str, ne_port:str, socket: socket.socket): #Args to be added
     """
     Sends ACKs, EOTs, and SYN to the network emulator. and logs the seqnum.
     """
-    raise NotImplementedError('Send_ack not implemented')
+    
+    if recv_packet.typ == 3:
+        # Send SYNACK
+        packet = Packet(3, 0, 0, "")
+        s.sendto(packet.encode(), (ne_addr, ne_port))
+        append_to_log(packet)
+
+
+
+
+    # raise NotImplementedError('Send_ack not implemented')
     return True
     
 if __name__ == '__main__':
@@ -33,6 +44,12 @@ if __name__ == '__main__':
     parser.add_argument("ne_port", metavar="<NE port number>", help="network emulator's UDP port number")
     parser.add_argument("recv_port", metavar="<Receiver port number>", help="network emulator's network address")
     parser.add_argument("dest_filename", metavar="<Destination Filename>", help="Filename to store received data")
+
+    args = parser.parse_args()
+    ne_addr: str = args.ne_addr
+    ne_port: int = int(args.ne_port)
+    recv_port: int = int(args.recv_port)
+    dest_filename: str = args.dest_filename
 
     # Clear the output and log files
     open(dest_filename, 'w').close()
@@ -48,4 +65,7 @@ if __name__ == '__main__':
 
         while True:
             # Receive packets, log the seqnum, and send response
-            
+            recv_packet, addr = s.recvfrom(1024)
+            recv_packet = Packet(recv_packet)
+            append_to_log(recv_packet)
+            send_ack(recv_packet, ne_addr, ne_port, s)

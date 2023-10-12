@@ -122,6 +122,7 @@ if __name__ == '__main__':
     parser.add_argument("<drop probability>", help="packet discard probability")
     parser.add_argument('<verbose>', nargs='?', default=0)
     args = parser.parse_args()
+    print("args: ", args)
     # set up sockets to be listening on
     args = args.__dict__ # A LAZY FIX
     max_delay = int(args["<Maximum Delay>"])

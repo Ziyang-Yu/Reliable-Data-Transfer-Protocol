@@ -9,6 +9,7 @@ import argparse
 import socket
 
 from packet import Packet
+from utils import RepeatTimer
 
 class Sender:
     def __init__(self, ne_host, ne_port, port, timeout, send_file, seqnum_file, ack_file, n_file, send_sock, recv_sock):
@@ -37,7 +38,6 @@ class Sender:
     def run(self):
         self.recv_sock.bind(('', self.port))
         self.perform_handshake()
-
         # write initial N to log
         self.n_file.write('t={} {}\n'.format(self.current_time, self.window_size))
         self.current_time += 1
@@ -52,17 +52,36 @@ class Sender:
         exit()
 
     def perform_handshake(self):
-        "Performs the connection establishment (stage 1) with the receiver"
+        # Send SYN
+        packet = Packet(3, 0, 0, "")
+        self.send_sock: socket.socket
+        timer = RepeatTimer(3, self.send_sock.sendto, [packet.encode(), (self.ne_host, self.ne_port)])
+        timer.start()
+        # return
+        self.transmit_and_log(packet)
 
-        raise NotImplementedError('perform_handshake not implemented')
-        return True    
+        # Wait for SYNACK
+        while True:
+            recv_packet, addr = self.recv_sock.recvfrom(1024)
+            recv_packet = Packet(recv_packet)
+            if recv_packet.typ == 3 and recv_packet.seqnum == 0:
+                timer.cancel()
+                break
 
-    def transmit_and_log(self, packet):
+        # raise NotImplementedError('perform_handshake not implemented')
+
+        return True
+
+    def transmit_and_log(self, packet: Packet):
         """
         Logs the seqnum and transmits the packet through send_sock.
         """
-        raise NotImplementedError('tramsit_and_log not implemented')
-        return True
+        # raise NotImplementedError('tramsit_and_log not implemented')
+
+        # Deal with SYN packet
+        if packet.typ == 3:
+            self.seqnum_file.write("T=-1 SYN\n")
+            self.n_file.write("t=0 1\n")
 
     def recv_ack(self):
         """
@@ -94,7 +113,7 @@ if __name__ == '__main__':
     parser.add_argument("timeout", type=float, help="Sender timeout in milliseconds")
     parser.add_argument("filename", type=str, help="Name of file to transfer")
     args = parser.parse_args()
-   
+
     with open(args.filename, 'r') as send_file, open('seqnum.log', 'w') as seqnum_file, \
             open('ack.log', 'w') as ack_file, open('N.log', 'w') as n_file, \
             socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as send_sock, \
