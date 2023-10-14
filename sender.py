@@ -9,7 +9,8 @@ import argparse
 import socket
 
 from packet import Packet
-from utils import RepeatTimer
+from utils import RepeatTimer, Timer
+
 
 class Sender:
     def __init__(self, ne_host, ne_port, port, timeout, send_file, seqnum_file, ack_file, n_file, send_sock, recv_sock):
@@ -29,11 +30,12 @@ class Sender:
 
         # internal state
         self.lock = threading.RLock() # prevent multiple threads from accessing the data simultaneously
-        self.window = [] # To keep track of the packets in the window
+        self.window = [] # To keep track of the packets in the window, format: [(seq_num, timer, index_of_content), ...]
         self.window_size = 1 # Current window size 
         self.timer = None # Threading.Timer object that calls the on_timeout function
         self.timer_packet = None # The packet that is currently being timed
         self.current_time = 0 # Current 'timestamp' for logging purposes
+        self.data_size = 500 # Maximum size of data in a packet
 
     def run(self):
         self.recv_sock.bind(('', self.port))
@@ -42,8 +44,8 @@ class Sender:
         self.n_file.write('t={} {}\n'.format(self.current_time, self.window_size))
         self.current_time += 1
 
-        recv_ack_thread = threading.Thread(target=sender.recv_ack)
-        send_data_thread = threading.Thread(target=sender.send_data)
+        recv_ack_thread = threading.Thread(target=self.recv_ack)
+        send_data_thread = threading.Thread(target=self.send_data)
         recv_ack_thread.start()
         send_data_thread.start()
         
@@ -77,11 +79,12 @@ class Sender:
         Logs the seqnum and transmits the packet through send_sock.
         """
         # raise NotImplementedError('tramsit_and_log not implemented')
-
+        # self.lock.acquire()
         # Deal with SYN packet
         if packet.typ == 3:
             self.seqnum_file.write("T=-1 SYN\n")
             self.n_file.write("t=0 1\n")
+        # self.lock.release()
 
     def recv_ack(self):
         """
@@ -94,8 +97,9 @@ class Sender:
         """ 
         Thread responsible for sending data and EOT to the network emulator.
         """
-        raise NotImplementedError('send_data not implemented')
-        return True
+        raise NotImplementedError('recv_ack not implemented')
+        
+
 
     def on_timeout(self):
         """
@@ -103,6 +107,31 @@ class Sender:
         """
         raise NotImplementedError('on_timeout not implemented')
         return True
+    
+    def init_window(self):
+        """
+        Initializes the window with the first N packets
+        """
+        self.lock.acquire()
+        self.window.append((0, Timer(), 0))
+        self.lock.release()
+
+    def update_window(self, ack_seqnum):
+        """
+        Updates the window by removing the first packet and adding a new packet
+        """
+        self.lock.acquire()
+        while True:
+            if ack_seqnum >= self.window[0][0] and ack_seqnum < self.window[0][0] + self.window_size:
+                self.window.pop(0)
+                self.window.append(((self.window[-1][0] + 1)%32, Timer(), self.window[-1][2] + self.data_size))
+                continue
+            if ack_seqnum < self.window[0][0] and ack_seqnum + 32 <= self.window[0][0] + self.window_size:
+                self.window.pop(0)
+                self.window.insert(0, ((self.window[0][0] - 1)%32, Timer(), self.window[0][2] - self.data_size))
+                continue
+            break
+        self.lock.release()
 
 if __name__ == '__main__':
     # Parse args
@@ -121,3 +150,4 @@ if __name__ == '__main__':
         sender = Sender(args.ne_host, args.ne_port, args.port, args.timeout, 
             send_file, seqnum_file, ack_file, n_file, send_sock, recv_sock)
         sender.run()
+    
