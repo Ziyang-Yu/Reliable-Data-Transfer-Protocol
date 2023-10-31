@@ -35,7 +35,7 @@ class RepeatTimer(Timer):
     def __init__(self, interval, function, args=None, kwargs=None):
         super().__init__(interval=interval, function=function, args=args, kwargs=kwargs)
         self.run_started = False
-        # self.finished = False
+        self.run_finished = False
 
     def run(self):
         self.run_started = True
@@ -45,12 +45,21 @@ class RepeatTimer(Timer):
 
 
 def log_file(t: int, content: str, file: TextIOWrapper, file_name: str):
+        # print("logging file")
+        # print("file name: ", file_name)
         if file_name == 'seqnum':
-            file.write('t={} {}\n'.format(t, content))
+            file.write(f't={t} {content}\n')
+            file.flush()
         elif file_name == 'N':
-            file.write('t={} {}\n'.format(t, content))
+            file.write(f't={t} {content}\n')
+            file.flush()
         elif file_name == 'ack':
-            file.write('t={} {}\n'.format(t, content))
+            # print("write to ack...")
+            # print("content: ", content)
+            # print("content type: ", type(content))
+            # print("t: ", t)
+            file.write(f't={t} {content}\n')
+            file.flush()
         else:
             raise ValueError('Invalid file name')
         

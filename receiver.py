@@ -7,6 +7,11 @@ import math
 from packet import Packet
 from utils import get_ack_num
 
+
+global expected_seq_num, seq_size, max_window_size, recv_buffer
+expected_seq_num, seq_size, max_window_size, recv_buffer = None, None, None, None
+
+
 # Writes the received content to file
 def append_to_file(filename, data):
     file = open(filename, 'a')
@@ -21,7 +26,7 @@ def append_to_log(packet: Packet):
     if packet.typ == 0:
         raise NotImplementedError('ack is not allowed to be sent')
     if packet.typ == 1:
-        append_to_file('arrival.log', '{packet.seqnum}\n')
+        append_to_file('arrival.log', f'{packet.seqnum}\n')
     if packet.typ == 2:
         append_to_file('arrival.log', 'EOT\n')
     if packet.typ == 3:
@@ -33,6 +38,12 @@ def send_ack(recv_packet: Packet, ne_addr: str, ne_port:str, socket: socket.sock
     Sends ACKs, EOTs, and SYN to the network emulator. and logs the seqnum.
     """
     
+    # print("expected_seq_num: ", expected_seq_num)
+    # print("recv_packet.seqnum: ", recv_packet.seqnum)
+    # print("recv_packet.typ: ", recv_packet.typ)
+    # print("recv_packet.data: ", recv_packet.data)
+    global expected_seq_num, seq_size, max_window_size, recv_buffer
+
     if recv_packet.typ == 0:
         raise NotImplementedError('ack is not allowed to be sent')
     
@@ -46,18 +57,23 @@ def send_ack(recv_packet: Packet, ne_addr: str, ne_port:str, socket: socket.sock
             expected_seq_num += 1
             while True:
                 if expected_seq_num in recv_buffer:
-                    expected_seq_num = (expected_seq_num + 1) % seq_size
+                    # expected_seq_num = (expected_seq_num + 1) % seq_size
                     append_to_file(dest_filename, recv_buffer[expected_seq_num])
                     del recv_buffer[expected_seq_num]
-                    expected_seq_num += 1
+                    expected_seq_num = (expected_seq_num + 1) % seq_size
                 else:
                     s.sendto(Packet(0, (expected_seq_num-1)%32, 0, '').encode(), (ne_addr, ne_port))
+                    # print(Packet(0, (expected_seq_num-1)%32, 0, ''))
                     break
         else:
-            if abs(recv_packet.seqnum-expected_seq_num) <= 10 or abs(recv_packet.seqnum-expected_seq_num) >= 22 and recv_packet.seqnum not in recv_buffer:
+            # if abs(recv_packet.seqnum-expected_seq_num) <= max_window_size or abs(recv_packet.seqnum-expected_seq_num) >= 32-max_window_size and recv_packet.seqnum not in recv_buffer:
+            expect_window = [(expected_seq_num + i) % 32 for i in range(max_window_size)]
+            if recv_packet.seqnum in expect_window:
                 recv_buffer[recv_packet.seqnum] = recv_packet.data
-            s.sendto(Packet(0, (expected_seq_num-1)%32, 0, '').encode(), (ne_addr, ne_port))
-            
+                s.sendto(Packet(0, (expected_seq_num-1)%32, 0, '').encode(), (ne_addr, ne_port))
+                # print(Packet(0, (expected_seq_num-1)%32, 0, ''))
+
+
 
     if recv_packet.typ == 2:
         # Send EOT
@@ -68,12 +84,6 @@ def send_ack(recv_packet: Packet, ne_addr: str, ne_port:str, socket: socket.sock
         # Send SYNACK
         s.sendto(recv_packet.encode(), (ne_addr, ne_port))
     
-
-
-
-
-    # raise NotImplementedError('Send_ack not implemented')
-    return True
     
 if __name__ == '__main__':
     # Parse args
@@ -92,6 +102,7 @@ if __name__ == '__main__':
     # Clear the output and log files
     open(dest_filename, 'w').close()
     open('arrival.log', 'w').close()
+
 
     expected_seq_num = 0 # Current Expected sequence number
     seq_size = 32 # Max sequence number

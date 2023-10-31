@@ -33,6 +33,7 @@ class Packet:
         Returns self encoded as a bytes object to be sent over the network
     """
     def encode(self):
+        # print(type(self.data))
         encoded_data = self.data.encode('ASCII')
         return struct.pack('!iii{}s'.format(self.length), self.typ, self.seqnum, self.length, encoded_data)
 

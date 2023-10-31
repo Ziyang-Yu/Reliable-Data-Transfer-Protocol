@@ -69,21 +69,25 @@ class Sender:
 
         # Wait for SYNACK
         while True:
+            recv_packet: Packet
             recv_packet, _ = self.recv_sock.recvfrom(1024)
             recv_packet = Packet(recv_packet)
+            # print(recv_packet)
             if recv_packet.typ == 3 and recv_packet.seqnum == 0:
                 timer.cancel()
                 break
-        # raise NotImplementedError('perform_handshake not implemented')
 
 
     def transmit_and_log(self, packet: Packet):
         """
         Logs the seqnum and transmits the packet through send_sock.
         """
-
+        # print("packet data: ", packet.data)
+        # print("transmit_and_log: ", packet)
         self.send_sock.sendto(packet.encode(), (self.ne_host, self.ne_port))
         log_file(self.current_time, packet.seqnum, self.seqnum_file, 'seqnum')
+        # print("window length: ", len(self.window))
+        # print("window_size: ", self.window_size)
         self.current_time += 1
 
 
@@ -92,18 +96,18 @@ class Sender:
         """
         Thread responsible for accepting acknowledgements and EOT sent from the network emulator.
         """
+        global EOT
 
         while True:
-            recv_pkt = self.recv_sock.recvfrom(1024)
+            print([pkt.seqnum for pkt in self.window])
+            recv_pkt, _ = self.recv_sock.recvfrom(1024)
             recv_pkt = Packet(recv_pkt)
-
+            # print("recv_pkt: ", recv_pkt)
             if recv_pkt.typ == 0:
                 # Deal with ACK packet
-                self.window_size = min(10, self.window_size+1)
+                self.window_size = min(10, self.window_size+1) 
                 self.n_file.write('t={} {}\n'.format(self.current_time, self.window_size))
-                self.lock.acquire()
                 self.update_window(recv_pkt.seqnum)
-                self.lock.release()
                 log_file(self.current_time, recv_pkt.seqnum, self.ack_file, 'ack')
                 self.current_time += 1
 
@@ -127,28 +131,29 @@ class Sender:
         while True:
 
             if self.on_timeout():
+                # print("Elapsed time: ", self.timer.elapsed())
                 self.window_size = 1
                 self.n_file.write('t={} {}\n'.format(self.current_time, self.window_size))
                 if len(self.window) == 0:
                     continue
                 self.transmit_and_log(self.window[0])
 
-            if len(self.window) == 0 and self.fifo.empty() and self.eot_timer.run_started == False:
+            if len(self.window) == 0 and self.fifo.empty() and not self.eot_timer.run_started:
                 self.eot_timer.start()
 
             if self.eot_timer.run_finished == True:
                 break
 
-            if len(self.window) < self.window_size and not self.fifo.empty():
+            while len(self.window) < self.window_size and not self.fifo.empty():
+                # print("Sending packet")
                 self.lock.acquire()
                 self.window.append(self.fifo.get())
-                self.lock.release()
+                # print("self.window[-1].data: ", self.window[-1].data)
+                print([pkt.seqnum for pkt in self.window])
+                print("window_size: ", self.window_size)
                 self.transmit_and_log(self.window[-1])
+                self.lock.release()
 
-        
-            
-
-            
 
     def on_timeout(self):
         """
@@ -156,8 +161,9 @@ class Sender:
         """
         if self.timer.elapsed() > self.timeout:
             self.timer.restart()
-
-        return True
+            return True
+        else:
+            return False
     
     def init_window(self):
         """
@@ -165,22 +171,25 @@ class Sender:
         """
         self.lock.acquire()
 
-        for _ in range(self.window_size):
-            self.window.append(self.fifo.get())
-
+        self.window.clear()
+        
         self.lock.release()
 
     def update_window(self, ack_seqnum):
         """
         Updates the window by removing the first packet and adding a new packet
         """
+        idx = None
         self.lock.acquire()
-
         for i in range(len(self.window)):
             if self.window[i].seqnum == ack_seqnum:
-                for _ in range(i):
-                    self.window.pop(0)
+                # self.window = self.window[i+1:]
+                idx = i
                 break
+        if idx != None:
+            self.window = self.window[idx+1:]
+        # print("after: ", len(self.window))
+
 
         self.lock.release()
 
@@ -188,12 +197,15 @@ class Sender:
         """
         Initializes the fifo with all data packets
         """
-        content = self.send_file.readlines()
+        content = "".join(self.send_file.readlines())
+        # print("type(content)", type(content))
 
-        for i in range(len(content), self.data_size):
-            pkt = Packet(1, i%32, self.data_size, content[i:i+self.data_size]) \
-                if i+self.data_size < len(content) \
-                else Packet(1, i%32, len(content)-i, content[i:])
+
+        for i in range(0, len(content), self.data_size):
+            pkt = Packet(1, (i/self.data_size)%32, self.data_size, content[i:i+self.data_size]) \
+                if i+self.data_size <= len(content) \
+                else Packet(1, (i/self.data_size)%32, len(content)-i, content[i:])
+            # print("pkt_seqnum: ", pkt.seqnum)
 
             self.fifo.put(pkt)
         
