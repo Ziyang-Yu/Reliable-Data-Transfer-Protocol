@@ -5,6 +5,7 @@ import socket
 import math
 
 from packet import Packet
+from utils import get_ack_num
 
 # Writes the received content to file
 def append_to_file(filename, data):
@@ -12,12 +13,19 @@ def append_to_file(filename, data):
     file.write(data)
     file.close()
 
-def append_to_log(packet):
+def append_to_log(packet: Packet):
     """
     Appends the packet information to the log file
     """
     # raise NotImplementedError('append_to_log not implemented')
-    return 
+    if packet.typ == 0:
+        raise NotImplementedError('ack is not allowed to be sent')
+    if packet.typ == 1:
+        append_to_file('arrival.log', '{packet.seqnum}\n')
+    if packet.typ == 2:
+        append_to_file('arrival.log', 'EOT\n')
+    if packet.typ == 3:
+        append_to_file('arrival.log', 'SYN\n')
     
 
 def send_ack(recv_packet: Packet, ne_addr: str, ne_port:str, socket: socket.socket): #Args to be added
@@ -25,11 +33,41 @@ def send_ack(recv_packet: Packet, ne_addr: str, ne_port:str, socket: socket.sock
     Sends ACKs, EOTs, and SYN to the network emulator. and logs the seqnum.
     """
     
+    if recv_packet.typ == 0:
+        raise NotImplementedError('ack is not allowed to be sent')
+    
+    if recv_packet.typ == 1:
+        # receive data
+        # send ack
+        if recv_packet.seqnum == expected_seq_num:
+            # write to file
+            append_to_file(dest_filename, recv_packet.data)
+            # update expected_seq_num
+            expected_seq_num += 1
+            while True:
+                if expected_seq_num in recv_buffer:
+                    expected_seq_num = (expected_seq_num + 1) % seq_size
+                    append_to_file(dest_filename, recv_buffer[expected_seq_num])
+                    del recv_buffer[expected_seq_num]
+                    expected_seq_num += 1
+                else:
+                    s.sendto(Packet(0, (expected_seq_num-1)%32, 0, '').encode(), (ne_addr, ne_port))
+                    break
+        else:
+            if abs(recv_packet.seqnum-expected_seq_num) <= 10 or abs(recv_packet.seqnum-expected_seq_num) >= 22 and recv_packet.seqnum not in recv_buffer:
+                recv_buffer[recv_packet.seqnum] = recv_packet.data
+            s.sendto(Packet(0, (expected_seq_num-1)%32, 0, '').encode(), (ne_addr, ne_port))
+            
+
+    if recv_packet.typ == 2:
+        # Send EOT
+        s.sendto(recv_packet.encode(), (ne_addr, ne_port))
+        exit()
+
     if recv_packet.typ == 3:
         # Send SYNACK
-        packet = Packet(3, 0, 0, "")
-        s.sendto(packet.encode(), (ne_addr, ne_port))
-        append_to_log(packet)
+        s.sendto(recv_packet.encode(), (ne_addr, ne_port))
+    
 
 
 

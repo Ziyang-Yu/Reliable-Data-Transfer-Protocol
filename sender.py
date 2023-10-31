@@ -7,10 +7,12 @@ import time
 import threading
 import argparse
 import socket
+import queue
 
 from packet import Packet
-from utils import RepeatTimer, Timer
+from utils import RepeatTimer, Watcher, log_file
 
+EOT = False
 
 class Sender:
     def __init__(self, ne_host, ne_port, port, timeout, send_file, seqnum_file, ack_file, n_file, send_sock, recv_sock):
@@ -30,20 +32,26 @@ class Sender:
 
         # internal state
         self.lock = threading.RLock() # prevent multiple threads from accessing the data simultaneously
-        self.window = [] # To keep track of the packets in the window, format: [(seq_num, timer, index_of_content), ...]
+        self.window = [] # To keep track of the packets in the window, format: [packet_1, packet_2, ...]
         self.window_size = 1 # Current window size 
         self.timer = None # Threading.Timer object that calls the on_timeout function
         self.timer_packet = None # The packet that is currently being timed
         self.current_time = 0 # Current 'timestamp' for logging purposes
         self.data_size = 500 # Maximum size of data in a packet
 
+        self.fifo = queue.Queue() # FIFO queue to hold all the data packets
+        self.eot_timer = RepeatTimer(3, self.send_eot)
+
     def run(self):
+        self.init_fifo()
         self.recv_sock.bind(('', self.port))
         self.perform_handshake()
         # write initial N to log
         self.n_file.write('t={} {}\n'.format(self.current_time, self.window_size))
         self.current_time += 1
 
+        self.timer = Watcher()
+        self.timer.start()
         recv_ack_thread = threading.Thread(target=self.recv_ack)
         send_data_thread = threading.Thread(target=self.send_data)
         recv_ack_thread.start()
@@ -55,57 +63,100 @@ class Sender:
 
     def perform_handshake(self):
         # Send SYN
-        packet = Packet(3, 0, 0, "")
-        self.send_sock: socket.socket
-        timer = RepeatTimer(3, self.send_sock.sendto, [packet.encode(), (self.ne_host, self.ne_port)])
+
+        timer = RepeatTimer(3, self.send_syn)
         timer.start()
-        # return
-        self.transmit_and_log(packet)
 
         # Wait for SYNACK
         while True:
-            recv_packet, addr = self.recv_sock.recvfrom(1024)
+            recv_packet, _ = self.recv_sock.recvfrom(1024)
             recv_packet = Packet(recv_packet)
             if recv_packet.typ == 3 and recv_packet.seqnum == 0:
                 timer.cancel()
                 break
-
         # raise NotImplementedError('perform_handshake not implemented')
 
-        return True
 
     def transmit_and_log(self, packet: Packet):
         """
         Logs the seqnum and transmits the packet through send_sock.
         """
-        # raise NotImplementedError('tramsit_and_log not implemented')
-        # self.lock.acquire()
-        # Deal with SYN packet
-        if packet.typ == 3:
-            self.seqnum_file.write("T=-1 SYN\n")
-            self.n_file.write("t=0 1\n")
-        # self.lock.release()
+
+        self.send_sock.sendto(packet.encode(), (self.ne_host, self.ne_port))
+        log_file(self.current_time, packet.seqnum, self.seqnum_file, 'seqnum')
+        self.current_time += 1
+
+
 
     def recv_ack(self):
         """
         Thread responsible for accepting acknowledgements and EOT sent from the network emulator.
         """
-        raise NotImplementedError('recv_ack not implemented')
-        return True
+
+        while True:
+            recv_pkt = self.recv_sock.recvfrom(1024)
+            recv_pkt = Packet(recv_pkt)
+
+            if recv_pkt.typ == 0:
+                # Deal with ACK packet
+                self.window_size = min(10, self.window_size+1)
+                self.n_file.write('t={} {}\n'.format(self.current_time, self.window_size))
+                self.lock.acquire()
+                self.update_window(recv_pkt.seqnum)
+                self.lock.release()
+                log_file(self.current_time, recv_pkt.seqnum, self.ack_file, 'ack')
+                self.current_time += 1
+
+            if recv_pkt.typ == 2:
+                EOT = True
+                self.eot_timer.cancel()
+
+            if EOT == True and len(self.window) == 0:
+                self.send_sock.close()
+                self.recv_sock.close()
+                break
+            
+
+
 
     def send_data(self):
         """ 
         Thread responsible for sending data and EOT to the network emulator.
         """
-        raise NotImplementedError('recv_ack not implemented')
-        
 
+        while True:
+
+            if self.on_timeout():
+                self.window_size = 1
+                self.n_file.write('t={} {}\n'.format(self.current_time, self.window_size))
+                if len(self.window) == 0:
+                    continue
+                self.transmit_and_log(self.window[0])
+
+            if len(self.window) == 0 and self.fifo.empty() and self.eot_timer.run_started == False:
+                self.eot_timer.start()
+
+            if self.eot_timer.run_finished == True:
+                break
+
+            if len(self.window) < self.window_size and not self.fifo.empty():
+                self.lock.acquire()
+                self.window.append(self.fifo.get())
+                self.lock.release()
+                self.transmit_and_log(self.window[-1])
+
+        
+            
+
+            
 
     def on_timeout(self):
         """
         Deals with the timeout condition
         """
-        raise NotImplementedError('on_timeout not implemented')
+        if self.timer.elapsed() > self.timeout:
+            self.timer.restart()
+
         return True
     
     def init_window(self):
@@ -113,7 +164,10 @@ class Sender:
         Initializes the window with the first N packets
         """
         self.lock.acquire()
-        self.window.append((0, Timer(), 0))
+
+        for _ in range(self.window_size):
+            self.window.append(self.fifo.get())
+
         self.lock.release()
 
     def update_window(self, ack_seqnum):
@@ -121,17 +175,46 @@ class Sender:
         Updates the window by removing the first packet and adding a new packet
         """
         self.lock.acquire()
-        while True:
-            if ack_seqnum >= self.window[0][0] and ack_seqnum < self.window[0][0] + self.window_size:
-                self.window.pop(0)
-                self.window.append(((self.window[-1][0] + 1)%32, Timer(), self.window[-1][2] + self.data_size))
-                continue
-            if ack_seqnum < self.window[0][0] and ack_seqnum + 32 <= self.window[0][0] + self.window_size:
-                self.window.pop(0)
-                self.window.insert(0, ((self.window[0][0] - 1)%32, Timer(), self.window[0][2] - self.data_size))
-                continue
-            break
+
+        for i in range(len(self.window)):
+            if self.window[i].seqnum == ack_seqnum:
+                for _ in range(i):
+                    self.window.pop(0)
+                break
+
         self.lock.release()
+
+    def init_fifo(self):
+        """
+        Initializes the fifo with all data packets
+        """
+        content = self.send_file.readlines()
+
+        for i in range(len(content), self.data_size):
+            pkt = Packet(1, i%32, self.data_size, content[i:i+self.data_size]) \
+                if i+self.data_size < len(content) \
+                else Packet(1, i%32, len(content)-i, content[i:])
+
+            self.fifo.put(pkt)
+        
+    def send_syn(self):
+        """
+        Sends a SYN packet to the network emulator
+        """
+        self.send_sock.sendto(Packet(3, 0, 0, "").encode(), (self.ne_host, self.ne_port))
+        self.seqnum_file.write('T=-1 SYN\n')
+
+
+    def send_eot(self):
+        """
+        Sends an EOT packet to the network emulator
+        """
+        self.send_sock.sendto(Packet(2, 0, 0, "").encode(), (self.ne_host, self.ne_port))
+        self.seqnum_file.write(f't={self.current_time} EOT\n')
+        self.current_time += 1
+
+
+
 
 if __name__ == '__main__':
     # Parse args
