@@ -37,7 +37,7 @@ class Sender:
         self.timer = None # Threading.Timer object that calls the on_timeout function
         self.timer_packet = None # The packet that is currently being timed
         self.current_time = 0 # Current 'timestamp' for logging purposes
-        self.data_size = 500 # Maximum size of data in a packet
+        self.data_size = 5 # Maximum size of data in a packet
 
         self.fifo = queue.Queue() # FIFO queue to hold all the data packets
         self.eot_timer = RepeatTimer(3, self.send_eot)
@@ -99,14 +99,16 @@ class Sender:
         global EOT
 
         while True:
-            print([pkt.seqnum for pkt in self.window])
+            # print([pkt.seqnum for pkt in self.window])
             recv_pkt, _ = self.recv_sock.recvfrom(1024)
             recv_pkt = Packet(recv_pkt)
+            # print("recv_pkt: ", recv_pkt.seqnum)
             # print("recv_pkt: ", recv_pkt)
             if recv_pkt.typ == 0:
                 # Deal with ACK packet
-                self.window_size = min(10, self.window_size+1) 
-                self.n_file.write('t={} {}\n'.format(self.current_time, self.window_size))
+                if self.window_size < 10:
+                    self.window_size += 1
+                    self.n_file.write('t={} {}\n'.format(self.current_time, self.window_size))
                 self.update_window(recv_pkt.seqnum)
                 log_file(self.current_time, recv_pkt.seqnum, self.ack_file, 'ack')
                 self.current_time += 1
@@ -132,8 +134,9 @@ class Sender:
 
             if self.on_timeout():
                 # print("Elapsed time: ", self.timer.elapsed())
-                self.window_size = 1
-                self.n_file.write('t={} {}\n'.format(self.current_time, self.window_size))
+                if self.window_size != 1:
+                    self.window_size = 1
+                    self.n_file.write('t={} {}\n'.format(self.current_time, self.window_size))
                 if len(self.window) == 0:
                     continue
                 self.transmit_and_log(self.window[0])
@@ -149,8 +152,8 @@ class Sender:
                 self.lock.acquire()
                 self.window.append(self.fifo.get())
                 # print("self.window[-1].data: ", self.window[-1].data)
-                print([pkt.seqnum for pkt in self.window])
-                print("window_size: ", self.window_size)
+                # print([pkt.seqnum for pkt in self.window])
+                # print("window_size: ", self.window_size)
                 self.transmit_and_log(self.window[-1])
                 self.lock.release()
 
@@ -214,7 +217,7 @@ class Sender:
         Sends a SYN packet to the network emulator
         """
         self.send_sock.sendto(Packet(3, 0, 0, "").encode(), (self.ne_host, self.ne_port))
-        self.seqnum_file.write('T=-1 SYN\n')
+        self.seqnum_file.write('t=-1 SYN\n')
 
 
     def send_eot(self):

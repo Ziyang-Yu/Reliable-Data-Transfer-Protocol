@@ -50,11 +50,12 @@ def send_ack(recv_packet: Packet, ne_addr: str, ne_port:str, socket: socket.sock
     if recv_packet.typ == 1:
         # receive data
         # send ack
+        # print("expected_seq_num: ", expected_seq_num)
         if recv_packet.seqnum == expected_seq_num:
             # write to file
             append_to_file(dest_filename, recv_packet.data)
             # update expected_seq_num
-            expected_seq_num += 1
+            expected_seq_num = (expected_seq_num + 1) % seq_size
             while True:
                 if expected_seq_num in recv_buffer:
                     # expected_seq_num = (expected_seq_num + 1) % seq_size
@@ -62,15 +63,15 @@ def send_ack(recv_packet: Packet, ne_addr: str, ne_port:str, socket: socket.sock
                     del recv_buffer[expected_seq_num]
                     expected_seq_num = (expected_seq_num + 1) % seq_size
                 else:
-                    s.sendto(Packet(0, (expected_seq_num-1)%32, 0, '').encode(), (ne_addr, ne_port))
+                    s.sendto(Packet(0, (expected_seq_num-1)%seq_size, 0, '').encode(), (ne_addr, ne_port))
                     # print(Packet(0, (expected_seq_num-1)%32, 0, ''))
                     break
         else:
             # if abs(recv_packet.seqnum-expected_seq_num) <= max_window_size or abs(recv_packet.seqnum-expected_seq_num) >= 32-max_window_size and recv_packet.seqnum not in recv_buffer:
-            expect_window = [(expected_seq_num + i) % 32 for i in range(max_window_size)]
-            if recv_packet.seqnum in expect_window:
+            expect_window = [(expected_seq_num + i+1) % seq_size for i in range(max_window_size)]
+            if recv_packet.seqnum in expect_window and recv_packet.seqnum not in recv_buffer:
                 recv_buffer[recv_packet.seqnum] = recv_packet.data
-                s.sendto(Packet(0, (expected_seq_num-1)%32, 0, '').encode(), (ne_addr, ne_port))
+            s.sendto(Packet(0, (expected_seq_num-1)% seq_size, 0, '').encode(), (ne_addr, ne_port))
                 # print(Packet(0, (expected_seq_num-1)%32, 0, ''))
 
 
