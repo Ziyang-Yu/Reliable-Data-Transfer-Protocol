@@ -37,7 +37,7 @@ class Sender:
         self.timer = None # Threading.Timer object that calls the on_timeout function
         self.timer_packet = None # The packet that is currently being timed
         self.current_time = 0 # Current 'timestamp' for logging purposes
-        self.data_size = 5 # Maximum size of data in a packet
+        self.data_size = 500 # Maximum size of data in a packet
 
         self.fifo = queue.Queue() # FIFO queue to hold all the data packets
         self.eot_timer = RepeatTimer(3, self.send_eot)
